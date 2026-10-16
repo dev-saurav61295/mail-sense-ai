@@ -1,6 +1,9 @@
 export type EmailCategory = 'REPLY_NOW' | 'REPLY_LATER' | 'IGNORE';
 export type EmailSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 
+// How the signed-in user relates to an email: TO/MENTIONED need a reply, CC/OTHER are FYI only
+export type RecipientRole = 'TO' | 'MENTIONED' | 'CC' | 'OTHER';
+
 export type ReplyPatternType = 'AFFIRMATIVE' | 'INQUIRY' | 'DECLINE' | 'DELEGATE' | 'CUSTOM';
 
 export interface SmartReplySuggestion {
@@ -39,6 +42,9 @@ export interface EmailAnalysis {
     defer: string;
   };
   smartSuggestions?: SmartReplySuggestion[];
+  // Recorded when analyzed; saved analyses without recipientRole predate the To/CC rule and are re-run
+  recipientRole?: RecipientRole;
+  alreadyReplied?: boolean;
 }
 
 export interface EmailItem {
@@ -48,6 +54,7 @@ export interface EmailItem {
   fromName: string;
   fromEmail: string;
   to: string;
+  cc?: string;
   subject: string;
   snippet: string;
   body: string;
@@ -56,6 +63,7 @@ export interface EmailItem {
   isUnread: boolean;
   isStarred: boolean;
   labelIds: string[];
+  alreadyReplied?: boolean; // newest message in the thread was sent by the user
   analysis?: EmailAnalysis;
   isAnalyzing?: boolean;
 }

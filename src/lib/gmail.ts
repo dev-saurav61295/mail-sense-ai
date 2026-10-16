@@ -121,6 +121,7 @@ export async function fetchInboxMessages(
 
         const from = getHeader('From');
         const to = getHeader('To');
+        const cc = getHeader('Cc');
         const subject = getHeader('Subject') || '(No Subject)';
         const dateStr = getHeader('Date');
         const sender = parseSender(from);
@@ -142,6 +143,7 @@ export async function fetchInboxMessages(
           fromName: sender.name,
           fromEmail: sender.email,
           to,
+          cc,
           subject,
           snippet: data.snippet || '',
           body,
@@ -164,6 +166,41 @@ export async function fetchInboxMessages(
   }
 
   return results;
+}
+
+// Flag emails whose thread already ends with a message the user sent (i.e. they've replied)
+export async function markRepliedThreads(
+  accessToken: string,
+  emails: EmailItem[]
+): Promise<EmailItem[]> {
+  const threadIds = [...new Set(emails.map((e) => e.threadId).filter(Boolean))];
+  const replied = new Set<string>();
+  const chunkSize = 5;
+
+  for (let i = 0; i < threadIds.length; i += chunkSize) {
+    await Promise.all(
+      threadIds.slice(i, i + chunkSize).map(async (threadId) => {
+        try {
+          const res = await fetch(
+            `https://gmail.googleapis.com/gmail/v1/users/me/threads/${threadId}?format=metadata&metadataHeaders=From`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          if (!res.ok) return;
+          const thread = await res.json();
+          const messages: any[] = thread.messages || [];
+          const newest = messages.reduce(
+            (a, b) => (Number(b.internalDate) > Number(a?.internalDate ?? 0) ? b : a),
+            null as any
+          );
+          if (newest?.labelIds?.includes('SENT')) replied.add(threadId);
+        } catch {
+          // leave unflagged; never block the sync
+        }
+      })
+    );
+  }
+
+  return emails.map((e) => (replied.has(e.threadId) ? { ...e, alreadyReplied: true } : e));
 }
 
 // Fetch sample sent messages to learn user's historical communication style

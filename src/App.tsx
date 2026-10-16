@@ -18,12 +18,14 @@ import {
   saveStyle,
   clearUserData,
 } from './lib/storage';
+import { getMyNames, getRecipientRole, needsReply } from './lib/recipient';
 import {
   fetchInboxMessages,
   createGmailDraft,
   sendGmailMessage,
   modifyGmailLabels,
   fetchSentMessages,
+  markRepliedThreads,
 } from './lib/gmail';
 import { DEMO_EMAILS, DEFAULT_USER_STYLE } from './lib/demoData';
 import { TopNav } from './components/TopNav';
@@ -116,12 +118,19 @@ export default function App() {
 
     setIsSyncing(true);
     try {
-      const realMessages = await fetchInboxMessages(currentToken, syncCount);
-      if (realMessages.length > 0) {
-        // Re-attach AI analysis saved from earlier syncs so only new emails need Gemini
+      const fetched = await fetchInboxMessages(currentToken, syncCount);
+      if (fetched.length > 0) {
+        const realMessages = await markRepliedThreads(currentToken, fetched);
+
+        // Re-attach AI analysis saved from earlier syncs so only new emails need Gemini. Skip entries
+        // saved before the To/CC rule (no recipientRole) and ones whose replied state has since changed.
         const uid = auth.currentUser?.uid;
         const saved = uid ? loadAnalyses(uid) : {};
-        const withSaved = realMessages.map((m) => (saved[m.id] ? { ...m, analysis: saved[m.id] } : m));
+        const withSaved = realMessages.map((m) => {
+          const s = saved[m.id];
+          const usable = s && s.recipientRole !== undefined && Boolean(s.alreadyReplied) === Boolean(m.alreadyReplied);
+          return usable ? { ...m, analysis: s } : m;
+        });
 
         liveDataRef.current = true;
         setEmails(withSaved);
@@ -164,12 +173,18 @@ export default function App() {
       return;
     }
 
+    // Only mail addressed To the user, or naming them in the body, is a reply candidate
+    const myEmail = auth.currentUser?.email || '';
+    const myNames = getMyNames(auth.currentUser?.displayName);
+    const batch = unanalyzed.slice(0, 15);
+    const roles = new Map(batch.map((e) => [e.id, getRecipientRole(e, myEmail, myNames)]));
+
     setIsAnalyzingBatch(true);
     try {
       const res = await fetch('/api/analyze-batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ emails: unanalyzed.slice(0, 15) }),
+        body: JSON.stringify({ emails: batch.map((e) => ({ ...e, recipientRole: roles.get(e.id) })) }),
       });
 
       if (!res.ok) {
@@ -183,13 +198,23 @@ export default function App() {
         prev.map((item) => {
           const match = analyses.find((a: any) => a.id === item.id);
           if (match) {
+            // Enforced here as well as in the prompt: CC-only / indirect mail is FYI, never "reply"
+            const role = roles.get(item.id) || 'TO';
+            const isFyi = !needsReply(role);
+            const replied = Boolean(item.alreadyReplied);
             return {
               ...item,
               analysis: {
-                category: match.category as EmailCategory,
+                category: (isFyi || replied ? 'IGNORE' : match.category) as EmailCategory,
                 severity: match.severity as EmailSeverity,
                 urgencyScore: match.urgencyScore,
-                summary: match.summary,
+                summary: replied
+                  ? `You already replied in this thread. ${match.summary}`
+                  : isFyi
+                    ? `FYI, ${role === 'CC' ? "you're only CC'd" : "you're not a direct recipient"}; no reply needed. ${match.summary}`
+                    : match.summary,
+                recipientRole: role,
+                alreadyReplied: replied,
                 actionItems: match.actionItems || [],
                 keyTopics: match.keyTopics || [],
                 deadline: match.deadline || null,

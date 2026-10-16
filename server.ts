@@ -51,6 +51,7 @@ interface EmailToAnalyze {
   snippet: string;
   bodySnippet?: string;
   date?: string;
+  recipientRole?: 'TO' | 'MENTIONED' | 'CC' | 'OTHER';
 }
 
 // Endpoint 1: Batch Analyze Emails for urgency, severity, category, and automated reply drafts
@@ -71,6 +72,7 @@ app.post('/api/analyze-batch', async (req, res) => {
         from: e.from,
         subject: e.subject || '(No Subject)',
         date: e.date,
+        yourRole: e.recipientRole || 'TO',
         snippet: (e.bodySnippet || e.snippet || '').slice(0, 1500),
       })),
       null,
@@ -78,6 +80,8 @@ app.post('/api/analyze-batch', async (req, res) => {
     );
 
     const prompt = `You are an expert executive email triage intelligence assistant.
+Each email has a "yourRole": TO (addressed to the user), MENTIONED (user is named in the body), CC (user is only copied), or OTHER (indirect recipient).
+If yourRole is CC or OTHER, the category MUST be "IGNORE": it is FYI and the user is not expected to reply.
 Analyze each incoming email below. For each email:
 1. Categorize it into EXACTLY one of:
    - "REPLY_NOW": Urgent, time-sensitive (deadline in <24h), client/executive request, critical blocker, direct question requiring immediate decision.
