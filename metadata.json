@@ -1,0 +1,6 @@
+{
+  "name": "MailSense AI - Smart Gmail Priority & Drafts",
+  "description": "Analyze incoming Gmail emails, classify severity, generate draft replies, and track email productivity metrics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
